@@ -2,6 +2,14 @@
 name = "async-graphql-hive-usage"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+license-file = "LICENSE.md"
+repository = "https://github.com/aaroningalls/async-graphql-hive-usage"
+description = "An async-graphql extension to report API usage to The Guild's GraphQL Hive"
+authors = ["Aaron Ingalls"]
+keywords = ["graphql", "async-graphql"]
+
 
 [dependencies]
 async-graphql = { version = "7", default-features = false }
