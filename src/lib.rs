@@ -133,6 +133,7 @@ struct HiveUsageBuffer {
     map: HashMap<String, OperationMapRecord>,
     operations: Vec<RequestOperation>,
     subscriptions: Vec<SubscriptionOperation>,
+    approx_size: usize,
 }
 
 impl From<HiveUsageBuffer> for Report {
@@ -165,8 +166,8 @@ impl HiveUsageClient {
         let (send, mut recv) = mpsc::channel::<Report>(3);
 
         let task = async move {
-            while let Some(report) = recv.next().await {
-                if sender.should_send(&report) {
+            while let Some((report, size)) = recv.next().await {
+                if size > 5_000_000 {
                     let body = match serde_json::to_vec(&report) {
                         Ok(b) => b,
                         Err(_) => continue,
@@ -230,7 +231,7 @@ impl HiveUsageClient {
 struct HiveUsageExtension {
     state: Mutex<HiveUsageState>,
     client: Arc<Mutex<HiveUsageBuffer>>,
-    channel: mpsc::Sender<Report>,
+    channel: mpsc::Sender<(Report, usize)>,
     subscriptions: bool,
     metadata: Option<MetadataFn>,
 }
@@ -317,26 +318,39 @@ impl Extension for HiveUsageExtension {
             && !state.fields.is_empty()
             && !state.fields.contains("Query.__schema")
         {
+            let mut size = 0;
             if !(buffer.map.contains_key(key)
                 || !self.subscriptions && state.subscription != SubscriptionState::NotSubscription)
             {
-                buffer.map.insert(
-                    key.clone(),
-                    OperationMapRecord {
+                size += operation.len() + key.len();
+                let record = OperationMapRecord {
                         operation: operation.clone(),
-                        operation_name: operation_name.map(|e| e.to_string()),
-                        fields: state.fields.iter().cloned().collect::<Vec<_>>(),
-                    },
-                );
+                    operation_name: operation_name.map(|e| {
+                        size += e.len() + 2;
+                        e.to_string()
+                    }),
+                    fields: state
+                        .fields
+                        .iter()
+                        .inspect(|e| size += e.len() + 2)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                };
+
+                buffer.map.insert(key.clone(), record);
             }
 
             if state.subscription == SubscriptionState::DetectedSubscription {
                 if self.subscriptions {
+                    let timestamp = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis();
+
+                    size += key.len() + 2 + (timestamp.ilog10() + 1) as usize;
+
                     let request = SubscriptionOperation {
-                        timestamp: SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis(),
+                        timestamp,
                         operation_map_key: key.clone(),
                         metadata: None,
                     };
@@ -345,23 +359,41 @@ impl Extension for HiveUsageExtension {
                     state.subscription = SubscriptionState::SavedOperation;
                 }
             } else {
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis();
+
+                let duration = duration.as_nanos();
+                let errors_total = response.errors.len();
+
+                size += key.len()
+                    + 2
+                    + errors_total
+                    + (timestamp.ilog10() + duration.ilog10() + 2) as usize;
+
                 let request = RequestOperation {
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis(),
+                    timestamp,
                     operation_map_key: key.clone(),
-                    metadata: self.metadata.clone().map(|f| f(ctx)),
+                    metadata: self.metadata.clone().map(|f| {
+                        let m = f(ctx);
+
+                        m.client
+                            .as_ref()
+                            .inspect(|e| size += e.name.len() + e.version.len() + 4);
+                        m
+                    }),
                     persisted_document_hash: None,
                     execution: Execution {
                         ok: response.is_ok(),
-                        duration: duration.as_nanos(),
-                        errors_total: response.errors.len() as i32,
+                        duration,
+                        errors_total: errors_total as i32,
                     },
                 };
 
                 buffer.operations.push(request);
             }
+            buffer.approx_size += size;
         }
 
         response
@@ -411,10 +443,10 @@ impl Extension for HiveUsageExtension {
             Ok(mut b) => b.clear(),
             Err(_) => return response,
         };
-
+        let size = buffer.approx_size;
         let report: Report = buffer.into();
 
-        let err = self.channel.clone().try_send(report);
+        let err = self.channel.clone().try_send((report, size));
 
         #[cfg(feature = "tracing")]
         {
