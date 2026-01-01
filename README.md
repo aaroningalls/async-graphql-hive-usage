@@ -32,7 +32,7 @@ A few things in the extension can be modified for more advanced use cases. Use `
 The extension keeps a running count of approximate size of the report and sends once it hits a default of ~5MB. This value changes the default
 
 ### `should_send`
-Alternatively to size checking, pass a function to more dynamically determine if/when the report should be sent. If this is supplied `send_size` and the default size calculation will be ignored. This function (if supplied) will be called on **every** GraphQL operation.
+Alternative to size checking, pass a function to more dynamically determine if/when the report should be sent. If this is supplied `send_size` and the default size calculation will be ignored. This function (if supplied) will be called on **every** GraphQL operation.
 
 ### `request_id`
 Calculate a UUIDv4 to be passed as the request id for this specific report. This is primarily supplied if you would like to use the ID somewhere else in your application
