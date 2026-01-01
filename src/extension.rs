@@ -9,7 +9,7 @@ use xxhash_rust::xxh3::xxh3_128;
 
 use crate::{
     HiveUsageClient,
-    hive_spec::{Execution, OperationMapRecord, Report, RequestOperation, SubscriptionOperation},
+    types::{Execution, OperationMapRecord, Report, RequestOperation, SubscriptionOperation},
 };
 use async_graphql::{
     Response, ServerResult, Value, Variables,

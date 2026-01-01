@@ -1,11 +1,11 @@
 mod extension;
-mod hive_spec;
+pub mod types;
 
 use crate::extension::HiveUsageBuffer;
 use async_graphql::{async_trait, extensions::ExtensionContext};
 use futures::{StreamExt, channel::mpsc};
-use hive_spec::{Metadata, Report};
 use std::sync::{Arc, Mutex};
+use types::{Metadata, Report};
 use uuid::Uuid;
 
 pub mod clients;
