@@ -199,13 +199,14 @@ impl Extension for HiveUsageExtension {
                 let request = RequestOperation {
                     timestamp,
                     operation_map_key: key.clone(),
-                    metadata: self.metadata.clone().map(|f| {
+                    metadata: self.metadata.as_ref().and_then(|f| {
                         let m = f(ctx);
 
-                        m.client
-                            .as_ref()
-                            .inspect(|e| size += e.name.len() + e.version.len() + 4);
-                        m
+                        m.inspect(|e| {
+                            e.client
+                                .as_ref()
+                                .inspect(|e| size += e.name.len() + e.version.len() + 4);
+                        })
                     }),
                     persisted_document_hash: None,
                     execution: Execution {
@@ -252,8 +253,6 @@ impl Extension for HiveUsageExtension {
                 .fields
                 .insert(format!("{}.{}", parent_type, info.name));
         }
-
-        // dbg!(info);
 
         let result = next.run(ctx, info).await?;
 

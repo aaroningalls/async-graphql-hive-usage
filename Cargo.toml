@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
-license-file = "LICENSE.md"
 repository = "https://github.com/aaroningalls/async-graphql-hive-usage"
 description = "An async-graphql extension to report API usage to The Guild's GraphQL Hive"
 authors = ["Aaron Ingalls"]
@@ -15,14 +14,14 @@ keywords = ["graphql", "async-graphql"]
 async-graphql = { version = "7", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 base64 = "0.22"
 futures = "0.3"
 tracing = { version = "0.1", optional = true }
-reqwest = { version = "0.12", optional = true }
+reqwest = { version = "0.12", features = ["json"], optional = true }
 surf = { version = "2.3", optional = true }
-ureq = { version = "3.1", optional = true }
+ureq = { version = "3.1", features = ["json"], optional = true }
 
 [features]
 default = ["tracing"]

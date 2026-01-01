@@ -1,6 +1,6 @@
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
-use crate::HiveSender;
+use crate::{HiveSender, types};
 
 /// A reqwest client for sending to hive. Implements `HiveSender`
 /// ```rs
@@ -29,7 +29,7 @@ impl Default for ReqwestClient {
 
 #[async_graphql::async_trait::async_trait]
 impl HiveSender for ReqwestClient {
-    async fn send(&self, req: crate::HiveHTTPRequest) {
+    async fn send(&self, req: crate::HiveHTTPRequest, id: uuid::Uuid) -> Option<types::Response> {
         let headers = req.header_map();
 
         let res = self
@@ -42,10 +42,11 @@ impl HiveSender for ReqwestClient {
 
         #[cfg(feature = "tracing")]
         {
-            if let Err(err) = res {
+            if let Err(err) = &res {
                 tracing::error!("request error: {err}")
             }
         }
+        res.ok()?.json::<types::Response>().await.ok()
     }
 }
 

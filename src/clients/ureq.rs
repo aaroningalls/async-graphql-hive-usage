@@ -1,3 +1,5 @@
+use crate::types;
+
 pub struct UreqClient {
     client: ureq::Agent,
 }
@@ -18,7 +20,7 @@ impl Default for UreqClient {
 
 #[async_graphql::async_trait::async_trait]
 impl crate::HiveSender for UreqClient {
-    async fn send(&self, req: crate::HiveHTTPRequest) {
+    async fn send(&self, req: crate::HiveHTTPRequest, _: uuid::Uuid) -> Option<types::Response> {
         let mut post = self.client.post(req.url);
 
         for (key, value) in req.headers {
@@ -29,9 +31,11 @@ impl crate::HiveSender for UreqClient {
 
         #[cfg(feature = "tracing")]
         {
-            if let Err(err) = res {
+            if let Err(err) = &res {
                 tracing::error!("request error: {err}")
             }
         }
+
+        res.ok()?.into_body().read_json::<types::Response>().ok()
     }
 }

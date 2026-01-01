@@ -26,7 +26,7 @@ pub struct HiveHTTPRequest {
 /// // async-graphql exports async_trait
 /// #[async_trait::async_trait]
 /// impl HiveSender for MyHive {
-///     async fn send(&self, req: HiveHTTPRequest) {
+///     async fn send(&self, req: HiveHTTPRequest, id: Uuid) -> Option<types::Response> {
 ///         // do stuff
 ///     }
 /// }
@@ -34,10 +34,10 @@ pub struct HiveHTTPRequest {
 #[async_trait::async_trait]
 pub trait HiveSender {
     /// Send the report
-    async fn send(&self, req: HiveHTTPRequest);
+    async fn send(&self, req: HiveHTTPRequest, id: Uuid) -> Option<types::Response>;
 }
 
-type MetadataFn = Arc<dyn Fn(&ExtensionContext<'_>) -> Metadata + Send + Sync>;
+type MetadataFn = Arc<dyn Fn(&ExtensionContext<'_>) -> Option<Metadata> + Send + Sync>;
 type RequestIdFn = Arc<dyn Fn() -> Uuid + Send + Sync>;
 type ShouldSendFn = Arc<dyn Fn(&Report) -> bool + Send + Sync>;
 
@@ -60,6 +60,57 @@ pub struct HiveClientBuilder<S: HiveSender> {
     send_size: usize,
 }
 
+async fn send_task<S: HiveSender>(
+    report: Report,
+    id: Uuid,
+    sender: &S,
+    target_id: Uuid,
+    token: &str,
+) {
+    let body = match serde_json::to_vec(&report) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+
+    #[cfg(feature = "tracing")]
+    {
+        tracing::info!(
+            "Hive Usage ({id}): sending {} operations",
+            report.operations.map(|e| e.len()).unwrap_or(0)
+        )
+    }
+
+    let req = HiveHTTPRequest {
+        url: format!("https://app.graphql-hive.com/usage/{target_id}"),
+        headers: vec![
+            ("authorization", format!("Bearer {token}")),
+            ("x-usage-api-version", "2".into()),
+            ("x-request-id", id.to_string()),
+            ("content-type", "application/json".into()),
+        ],
+        body,
+    };
+
+    let res = sender.send(req, id).await;
+
+    #[cfg(feature = "tracing")]
+    {
+        if let Some(res) = res {
+            match res {
+                types::Response::Ok(b) => tracing::info!(
+                    "hive request {}: {} accepted, {} rejected",
+                    b.id,
+                    b.operations.accepted,
+                    b.operations.rejected
+                ),
+                types::Response::Err(b) => {
+                    tracing::error!("{} hive errors: {:?}", b.errors.len(), b.errors)
+                }
+            }
+        }
+    }
+}
+
 impl HiveUsageClient {
     pub fn new(
         sender: impl HiveSender,
@@ -71,33 +122,7 @@ impl HiveUsageClient {
         let task = async move {
             while let Some((report, size)) = recv.next().await {
                 if size > 5_000_000 {
-                    let body = match serde_json::to_vec(&report) {
-                        Ok(b) => b,
-                        Err(_) => continue,
-                    };
-
-                    let id = Uuid::new_v4().to_string();
-
-                    #[cfg(feature = "tracing")]
-                    {
-                        tracing::info!(
-                            "Hive Usage ({id}): sending {} operations",
-                            report.operations.map(|e| e.len()).unwrap_or(0)
-                        )
-                    }
-
-                    let req = HiveHTTPRequest {
-                        url: format!("https://app.graphql-hive.com/usage/{target_id}"),
-                        headers: vec![
-                            ("Authorization", format!("Bearer {token}")),
-                            ("X-Usage-API-Version", "2".into()),
-                            ("X-Request-Id", id),
-                            ("Content-Type", "application/json".into()),
-                        ],
-                        body,
-                    };
-
-                    sender.send(req).await;
+                    send_task(report, Uuid::new_v4(), &sender, target_id, &token).await;
                 }
             }
         };
@@ -167,7 +192,7 @@ impl<S: HiveSender> HiveClientBuilder<S> {
     /// Attach metadata to a GraphQL operation.
     pub fn metadata<F>(mut self, func: F) -> Self
     where
-        F: Fn(&ExtensionContext<'_>) -> Metadata + Send + Sync + 'static,
+        F: Fn(&ExtensionContext<'_>) -> Option<Metadata> + Send + Sync + 'static,
     {
         self.metadata = Some(Arc::new(func));
         self
@@ -190,34 +215,10 @@ impl<S: HiveSender> HiveClientBuilder<S> {
                     size > self.send_size
                 };
 
+                let id = (self.request_id)();
+
                 if send {
-                    let body = match serde_json::to_vec(&report) {
-                        Ok(b) => b,
-                        Err(_) => continue,
-                    };
-
-                    let id = (self.request_id)().to_string();
-
-                    #[cfg(feature = "tracing")]
-                    {
-                        tracing::info!(
-                            "Hive Usage ({id}): sending {} operations",
-                            report.operations.map(|e| e.len()).unwrap_or(0)
-                        )
-                    }
-
-                    let req = HiveHTTPRequest {
-                        url: format!("https://app.graphql-hive.com/usage/{}", self.target_id),
-                        headers: vec![
-                            ("Authorization", format!("Bearer {}", self.token)),
-                            ("X-Usage-API-Version", "2".into()),
-                            ("X-Request-Id", id),
-                            ("Content-Type", "application/json".into()),
-                        ],
-                        body,
-                    };
-
-                    self.sender.send(req).await;
+                    send_task(report, id, &self.sender, self.target_id, &self.token).await;
                 }
             }
         };
